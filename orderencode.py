@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 import json, cStringIO, traceback, sys
 
-filename = sys.argv[1] if len(sys.argv) > 1 else 'gbt'
-
 def feerate(x):
     return x['fee'] / (len(x['data'])/2.)
 
@@ -79,12 +77,33 @@ def unmake_bitmap(bitmap, residuals):
     return n_vals
 
 if __name__ == '__main__':
+
+    if len(sys.argv) < 2:
+        print """Usage:
+        bitcoin-cli getblocktemplate > somefilename
+        python orderencode.py s[-v] omefilename
+
+        If you don't have bitcoin-cli handy, feel free to try it on the four sample
+        GBT files in samplegbts/:
+
+        for i in `seq 1 4`; do python orderencode.py samplegbts/$i; done
+        """
+        sys.exit()
+
+    filename = sys.argv[-1]
+
     with open(filename, 'r') as f:
         gbt = json.loads(f.read())
     txlist = gbt['transactions']
     off, comp =  encode_order(txlist)
 
     print "%i bitmap bytes, %i residual varints, %i offset varints" % (len(comp[0][0]), len(comp[0][1]), len(comp[1]))
+    def varintsize(x):
+        if -2**8  < x <  (2**8-4): return 1
+        if -2**16 < x < (2**16-1): return 3
+        if -2**32 < x < (2**32-1): return 5
+        if -2**64 < x < (2**64-1): return 9
+    print "%i bytes total" % (len(comp[0][0]) + sum(map(varintsize, comp[0][1])) + sum(map(varintsize, comp[1])))
     print len(txlist), "transactions total"
 
 
@@ -95,7 +114,12 @@ if __name__ == '__main__':
         print "Wrong list lengt! %i != %i" % (len(decoded), len(txlist))
     errors = sum([int(gb!=dc) for gb, dc in zip(decoded, txlist)])
     print "%i total errors" % errors
-    if not decoded == gbt['transactions']:
-        print "idx\tGBT\tDec\tSort\tCorrect\tOffset"
+    print "\nCompressed data:"
+    print "  Bitmap of non-repeating offsets:", map(ord, comp[0][0])
+    print "  Repetition count of repeating offsets:", comp[0][1]
+    print "  The offsets values:", comp[1]
+    print ""
+    if not decoded == gbt['transactions'] or '-v' in sys.argv:
+        print "idx\tGBT\tDecoded\tSorted\tCorrect\tOffset"
         for idx, dc, gb, bf, o in zip(range(len(decoded)), decoded, txlist, byfee, off):
             print "%i\t%7.3f\t%7.3f\t%7.3f\t%s\t%i" % (idx, feerate(gb), feerate(dc), feerate(bf), '*' if gb == dc else "", o)
